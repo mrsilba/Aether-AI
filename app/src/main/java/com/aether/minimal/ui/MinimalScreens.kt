@@ -83,6 +83,8 @@ import com.aether.model.HubModelEntry
 import com.aether.model.ModelSourceProvider
 import com.aether.project.AuditFinding
 import com.aether.project.FindingSeverity
+import com.aether.storage.DriveFileItem
+import com.aether.storage.DriveOAuthState
 import com.aether.ui.WorkstationScreen
 import com.aether.ui.WorkstationUiState
 import com.aether.ui.WorkstationViewModel
@@ -1499,6 +1501,317 @@ fun MinimalGitScreen(
                             Text("Stage All & Commit", style = MinimalTypography.caption.copy(color = Color.White, fontWeight = FontWeight.Bold))
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+// ==========================================
+// 8.5 MINIMAL INTEGRATIONS SCREEN (CLOUD & DRIVE)
+// ==========================================
+
+@Composable
+fun MinimalIntegrationsScreen(
+    uiState: WorkstationUiState,
+    viewModel: WorkstationViewModel,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalMinimalColors.current
+    var showAuthDialog by remember { mutableStateOf(false) }
+    var inputAccessToken by remember { mutableStateOf("") }
+    var inputEmail by remember { mutableStateOf("") }
+    var showSetupGuide by remember { mutableStateOf(false) }
+
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = MinimalDimens.padStandard),
+        verticalArrangement = Arrangement.spacedBy(MinimalDimens.padStandard),
+        contentPadding = PaddingValues(top = MinimalDimens.padSm, bottom = 80.dp)
+    ) {
+        item {
+            Text("Cloud & Storage Integrations", style = MinimalTypography.largeTitle.copy(color = colors.textPrimary))
+            Text("Google Drive REST API v3, Storage Access Framework (SAF), & Cloud AI", style = MinimalTypography.caption.copy(color = colors.textTertiary))
+        }
+
+        // Status banner if present
+        if (!uiState.driveStatusMessage.isNullOrBlank()) {
+            item {
+                MinimalCard {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = uiState.driveStatusMessage ?: "",
+                            style = MinimalTypography.codeSmall.copy(color = colors.accent),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Clear",
+                            tint = colors.textTertiary,
+                            modifier = Modifier
+                                .size(18.dp)
+                                .clickable { viewModel.clearStatusMessage() }
+                        )
+                    }
+                }
+            }
+        }
+
+        // Google Drive Status Card
+        item {
+            MinimalCard {
+                Column(verticalArrangement = Arrangement.spacedBy(MinimalDimens.padSm)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Google Drive v3 REST API", style = MinimalTypography.headline.copy(color = colors.textPrimary, fontWeight = FontWeight.Bold))
+                            Text(
+                                text = "Status: ${uiState.driveOAuthState.label}",
+                                style = MinimalTypography.caption.copy(
+                                    color = if (uiState.driveOAuthState == DriveOAuthState.AUTHENTICATED) colors.success else colors.warning,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(MinimalDimens.radiusPill))
+                                .background(if (uiState.driveOAuthState == DriveOAuthState.AUTHENTICATED) colors.errorSubtle else colors.accentSubtle)
+                                .clickable {
+                                    if (uiState.driveOAuthState == DriveOAuthState.AUTHENTICATED) {
+                                        viewModel.disconnectGoogleDrive()
+                                    } else {
+                                        showAuthDialog = true
+                                    }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = if (uiState.driveOAuthState == DriveOAuthState.AUTHENTICATED) "Disconnect" else "Configure OAuth",
+                                style = MinimalTypography.caption.copy(
+                                    color = if (uiState.driveOAuthState == DriveOAuthState.AUTHENTICATED) colors.error else colors.accent,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+                    }
+
+                    if (uiState.driveAccount != null) {
+                        Text(
+                            text = "Account: ${uiState.driveAccount.displayName} (${uiState.driveAccount.email})",
+                            style = MinimalTypography.body.copy(color = colors.textSecondary)
+                        )
+                        Text(
+                            text = "Least-Privilege Scopes: drive.file, drive.readonly",
+                            style = MinimalTypography.caption.copy(color = colors.textTertiary)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Google Drive Actions Card
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(MinimalDimens.padSm)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(MinimalDimens.radiusSm))
+                        .background(colors.accent)
+                        .clickable(enabled = !uiState.isDriveLoading) {
+                            viewModel.fetchGoogleDriveFiles()
+                        }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (uiState.isDriveLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                    } else {
+                        Text("Fetch Drive Files", style = MinimalTypography.caption.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(MinimalDimens.radiusSm))
+                        .background(colors.surfaceElevated)
+                        .clickable { showSetupGuide = !showSetupGuide }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (showSetupGuide) "Hide Guide" else "Setup Guide",
+                        style = MinimalTypography.caption.copy(color = colors.textSecondary, fontWeight = FontWeight.SemiBold)
+                    )
+                }
+            }
+        }
+
+        // Setup Guide Collapsible
+        if (showSetupGuide) {
+            item {
+                MinimalCard {
+                    Column(verticalArrangement = Arrangement.spacedBy(MinimalDimens.padSm)) {
+                        Text("Google Cloud Console OAuth Instructions", style = MinimalTypography.headline.copy(color = colors.textPrimary))
+                        Text(
+                            "1. Go to console.cloud.google.com and open or create your Cloud Project.\n" +
+                            "2. In 'APIs & Services' > 'Library', enable the 'Google Drive API'.\n" +
+                            "3. Configure OAuth Consent Screen (User Type: External) and add scopes '.../auth/drive.file' and '.../auth/drive.readonly'.\n" +
+                            "4. Create OAuth 2.0 Client ID or acquire an OAuth Bearer token.\n" +
+                            "5. Tap 'Configure OAuth' above and paste your Bearer token.\n" +
+                            "All tokens are securely encrypted using Android Keystore AES-256-GCM hardware security.",
+                            style = MinimalTypography.footnote.copy(color = colors.textSecondary)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Configure Auth Token Input Card
+        if (showAuthDialog) {
+            item {
+                MinimalCard {
+                    Column(verticalArrangement = Arrangement.spacedBy(MinimalDimens.padSm)) {
+                        Text("Configure Google Drive Access Token", style = MinimalTypography.headline.copy(color = colors.textPrimary))
+                        Text("Email Address", style = MinimalTypography.caption.copy(color = colors.textSecondary))
+                        BasicTextField(
+                            value = inputEmail,
+                            onValueChange = { inputEmail = it },
+                            textStyle = MinimalTypography.codeSmall.copy(color = colors.textPrimary),
+                            cursorBrush = SolidColor(colors.accent),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(38.dp)
+                                .clip(RoundedCornerShape(MinimalDimens.radiusSm))
+                                .background(colors.surfaceElevated)
+                                .padding(horizontal = 8.dp, vertical = 9.dp)
+                        )
+                        Text("OAuth Bearer Token (ya29...)", style = MinimalTypography.caption.copy(color = colors.textSecondary))
+                        BasicTextField(
+                            value = inputAccessToken,
+                            onValueChange = { inputAccessToken = it },
+                            textStyle = MinimalTypography.codeSmall.copy(color = colors.textPrimary),
+                            cursorBrush = SolidColor(colors.accent),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(60.dp)
+                                .clip(RoundedCornerShape(MinimalDimens.radiusSm))
+                                .background(colors.surfaceElevated)
+                                .padding(horizontal = 8.dp, vertical = 8.dp)
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(MinimalDimens.padSm)) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(MinimalDimens.radiusSm))
+                                    .background(colors.accent)
+                                    .clickable {
+                                        if (inputAccessToken.isNotBlank() && inputEmail.isNotBlank()) {
+                                            viewModel.configureDriveOAuthTokens(
+                                                accessToken = inputAccessToken.trim(),
+                                                refreshToken = null,
+                                                expiresInSec = 3600L,
+                                                email = inputEmail.trim()
+                                            )
+                                            showAuthDialog = false
+                                        }
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text("Store Encrypted Token", style = MinimalTypography.caption.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(MinimalDimens.radiusSm))
+                                    .background(colors.surfaceElevated)
+                                    .clickable { showAuthDialog = false }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text("Cancel", style = MinimalTypography.caption.copy(color = colors.textSecondary))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Drive Files List
+        item {
+            MinimalSectionTitle(
+                title = "Drive Remote Files (${uiState.driveFiles.size})",
+                subtitle = "Select file to import atomically into workspace"
+            )
+        }
+
+        if (uiState.driveFiles.isEmpty()) {
+            item {
+                MinimalCard {
+                    Text(
+                        text = if (uiState.driveOAuthState == DriveOAuthState.AUTHENTICATED) {
+                            "No files found or click 'Fetch Drive Files' above."
+                        } else {
+                            "Connect Google Drive with OAuth to browse and import cloud files."
+                        },
+                        style = MinimalTypography.body.copy(color = colors.textTertiary)
+                    )
+                }
+            }
+        } else {
+            items(uiState.driveFiles) { driveFile ->
+                MinimalCard {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = driveFile.name,
+                                style = MinimalTypography.subhead.copy(color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
+                            )
+                            Text(
+                                text = "${driveFile.sizeBytes / 1024} KB • ${driveFile.mimeType}",
+                                style = MinimalTypography.caption.copy(color = colors.textSecondary)
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(MinimalDimens.radiusSm))
+                                .background(colors.accentSubtle)
+                                .clickable { viewModel.downloadGoogleDriveFile(driveFile) }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text("Download", style = MinimalTypography.caption.copy(color = colors.accent, fontWeight = FontWeight.Bold))
+                        }
+                    }
+                }
+            }
+        }
+
+        // Storage Access Framework (SAF) Local Integration
+        item {
+            MinimalSectionTitle(
+                title = "Android Storage Access Framework (SAF)",
+                subtitle = "Zero-permission local storage provider"
+            )
+            MinimalCard {
+                Column(verticalArrangement = Arrangement.spacedBy(MinimalDimens.padSm)) {
+                    Text("Local File Import & Archival", style = MinimalTypography.headline.copy(color = colors.textPrimary))
+                    Text(
+                        "Workspace directory is securely isolated. Use the Android system DocumentProvider to import local files or archives.",
+                        style = MinimalTypography.caption.copy(color = colors.textSecondary)
+                    )
                 }
             }
         }

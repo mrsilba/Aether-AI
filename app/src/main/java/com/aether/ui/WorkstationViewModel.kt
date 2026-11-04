@@ -39,6 +39,11 @@ import com.aether.project.AuditFinding
 import com.aether.project.ProjectAuditAndRepairEngine
 import com.aether.project.ProjectAuditReport
 import com.aether.storage.CloudStorageManager
+import com.aether.storage.DriveAccountInfo
+import com.aether.storage.DriveFileItem
+import com.aether.storage.DriveOAuthState
+import com.aether.storage.GoogleDriveApiClient
+import com.aether.storage.GoogleDriveOAuthManager
 import com.aether.terminal.SandboxedTerminalSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,15 +57,18 @@ enum class WorkstationScreen(val title: String, val iconName: String) {
     DASHBOARD("Dashboard", "Dashboard"),
     EDITOR("Code Editor", "Code"),
     TERMINAL("Terminal", "Terminal"),
-    AGENT("ReAct Agent", "SmartToy"),
+    AGENT("AI Assistant", "SmartToy"),
     AUDIT("Security Audit", "Security"),
     MODELS("Models Hub", "Psychology"),
     MEMORY("Project Memory", "Storage"),
+    GIT("Source Control", "Branch"),
+    INTEGRATIONS("Cloud & Drive", "Cloud"),
     SETTINGS("Settings", "Settings")
 }
 
 data class WorkstationUiState(
     val currentScreen: WorkstationScreen = WorkstationScreen.DASHBOARD,
+    val activeProjectName: String = "Workspace",
     val hardwareProfile: HardwareCapabilityProfile? = null,
     val openTabs: List<EditorTab> = emptyList(),
     val activeTab: EditorTab? = null,
@@ -87,7 +95,13 @@ data class WorkstationUiState(
     val gitStatus: GitWorkingStatus? = null,
     val gitBranches: List<String> = emptyList(),
     val projectStructure: ProjectStructureMap? = null,
-    val cloudApiKeysConfigured: Map<CloudProviderType, Boolean> = emptyMap()
+    val cloudApiKeysConfigured: Map<CloudProviderType, Boolean> = emptyMap(),
+    // Google Drive & Cloud Integrations State
+    val driveOAuthState: DriveOAuthState = DriveOAuthState.DISCONNECTED,
+    val driveAccount: DriveAccountInfo? = null,
+    val driveFiles: List<DriveFileItem> = emptyList(),
+    val isDriveLoading: Boolean = false,
+    val driveStatusMessage: String? = null
 )
 
 class WorkstationViewModel(application: Application) : AndroidViewModel(application) {
@@ -107,6 +121,8 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
     val gitManager = GitRepositoryManager(workspaceDir, terminalSession)
     val cloudStorageManager = CloudStorageManager(application, workspaceDir)
     val cloudAiProviderManager = CloudAiProviderManager(application)
+    val googleDriveOAuthManager = GoogleDriveOAuthManager(application)
+    val googleDriveApiClient = GoogleDriveApiClient()
 
     private val defaultModel = ModelDescriptor(
         id = "qwen2.5-coder-3b-q4k",
@@ -139,6 +155,7 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
         initCatalogAndState()
         observeDatabase()
         observeModelHub()
+        observeGoogleDrive()
         refreshGitStatus()
         analyzeProjectStructure()
         refreshCloudKeyStatuses()
@@ -150,13 +167,18 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
         val activeTab = editorController.getActiveTab()
         val symbols = if (activeTab != null) editorController.extractSymbols(activeTab.content) else emptyList()
 
+        // Truthful initial model state: Only mark loaded if the GGUF file exists on storage
+        val defaultPath = defaultModel.localFilePath
+        val defaultModelFile = if (defaultPath != null) File(defaultPath) else null
+        val initialLoadedModel = if (defaultModelFile != null && defaultModelFile.exists() && defaultModelFile.length() > 0) defaultModel else null
+
         _uiState.update {
             it.copy(
                 hardwareProfile = initialProfile,
                 openTabs = editorController.getTabs(),
                 activeTab = activeTab,
                 symbols = symbols,
-                activeLoadedModel = defaultModel,
+                activeLoadedModel = initialLoadedModel,
                 mcpTools = mcpRuntime.listTools()
             )
         }
@@ -170,6 +192,19 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
                     availableModels = hubList.map { h -> h.descriptor },
                     taskRecommendations = recs
                 )
+            }
+        }
+    }
+
+    private fun observeGoogleDrive() {
+        viewModelScope.launch {
+            googleDriveOAuthManager.authState.collect { auth ->
+                _uiState.update { it.copy(driveOAuthState = auth) }
+            }
+        }
+        viewModelScope.launch {
+            googleDriveOAuthManager.currentAccount.collect { account ->
+                _uiState.update { it.copy(driveAccount = account) }
             }
         }
     }
@@ -652,7 +687,123 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
         refreshHardwareProfile()
     }
 
+    fun setProjectName(name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isNotEmpty()) {
+            _uiState.update { it.copy(activeProjectName = trimmed) }
+        }
+    }
+
+    // -------------------------------------------------------------
+    // GOOGLE DRIVE & CLOUD INTEGRATION OPERATIONS
+    // -------------------------------------------------------------
+    fun configureDriveOAuthTokens(
+        accessToken: String,
+        refreshToken: String?,
+        expiresInSec: Long,
+        email: String
+    ) {
+        viewModelScope.launch {
+            googleDriveOAuthManager.saveSession(
+                accessToken = accessToken,
+                refreshToken = refreshToken,
+                expiresInSeconds = expiresInSec,
+                email = email
+            )
+            _uiState.update { it.copy(driveStatusMessage = "Google Drive session authenticated.") }
+            fetchGoogleDriveFiles()
+        }
+    }
+
+    fun disconnectGoogleDrive() {
+        viewModelScope.launch {
+            googleDriveOAuthManager.disconnectAndRevoke()
+            _uiState.update {
+                it.copy(
+                    driveFiles = emptyList(),
+                    driveStatusMessage = "Google Drive disconnected and tokens revoked."
+                )
+            }
+        }
+    }
+
+    fun fetchGoogleDriveFiles(folderId: String? = null) {
+        val token = googleDriveOAuthManager.getActiveAccessToken()
+        if (token.isNullOrBlank()) {
+            _uiState.update {
+                it.copy(
+                    driveStatusMessage = "Google Drive not authenticated. Please configure credentials."
+                )
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isDriveLoading = true, driveStatusMessage = "Listing Google Drive files...") }
+            val result = googleDriveApiClient.listFiles(accessToken = token, folderId = folderId)
+            result.onSuccess { response ->
+                _uiState.update {
+                    it.copy(
+                        isDriveLoading = false,
+                        driveFiles = response.files,
+                        driveStatusMessage = "Loaded ${response.files.size} Google Drive items."
+                    )
+                }
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(
+                        isDriveLoading = false,
+                        driveStatusMessage = "Failed to list Drive files: ${err.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun downloadGoogleDriveFile(fileItem: DriveFileItem) {
+        val token = googleDriveOAuthManager.getActiveAccessToken()
+        if (token.isNullOrBlank()) {
+            _uiState.update { it.copy(driveStatusMessage = "Authentication required for downloading.") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isDriveLoading = true, driveStatusMessage = "Downloading ${fileItem.name}...") }
+            val destFile = File(workspaceDir, fileItem.name)
+            val result = googleDriveApiClient.downloadBinaryFile(
+                accessToken = token,
+                fileId = fileItem.id,
+                targetFile = destFile
+            )
+            result.onSuccess { downloaded ->
+                _uiState.update {
+                    it.copy(
+                        isDriveLoading = false,
+                        driveStatusMessage = "Saved ${downloaded.name} (${downloaded.length()} bytes) to workspace."
+                    )
+                }
+                editorController.openFile(downloaded)
+                val active = editorController.getActiveTab()
+                _uiState.update {
+                    it.copy(
+                        openTabs = editorController.getTabs(),
+                        activeTab = active
+                    )
+                }
+                analyzeProjectStructure()
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(
+                        isDriveLoading = false,
+                        driveStatusMessage = "Drive download failed: ${err.message}"
+                    )
+                }
+            }
+        }
+    }
+
     fun clearStatusMessage() {
-        _uiState.update { it.copy(statusMessage = null) }
+        _uiState.update { it.copy(statusMessage = null, driveStatusMessage = null) }
     }
 }
+

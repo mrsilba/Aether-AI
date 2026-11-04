@@ -1,6 +1,6 @@
 {
-  "name": "Aether AI",
-  "description": "Android AI development workstation with hardware-adaptive GGUF & cloud inference, sandboxed terminal, code editor, and ReAct agent.",
+  "name": "AETHER AI",
+  "description": "Professional mobile software engineering workstation with adaptive AI inference, restricted terminal, code editor, Git version control, and cloud integrations.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

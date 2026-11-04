@@ -106,8 +106,8 @@ fun MinimalWorkstationScreen(
             containerColor = colors.background,
             topBar = {
                 MinimalHeader(
-                    projectName = "Quantum-Dev",
-                    modelName = uiState.activeLoadedModel?.name ?: "TinyCoder 1.5B",
+                    projectName = uiState.activeProjectName,
+                    modelName = uiState.activeLoadedModel?.name ?: "No Model Loaded",
                     deviceRamInfo = uiState.hardwareProfile?.let {
                         "${it.availableRamMb}MB free • ${it.effectiveTier.name}"
                     } ?: "Ready",
@@ -173,6 +173,18 @@ fun MinimalWorkstationScreen(
                             viewModel = viewModel
                         )
                     }
+                    WorkstationScreen.GIT -> {
+                        MinimalGitScreen(
+                            uiState = uiState,
+                            viewModel = viewModel
+                        )
+                    }
+                    WorkstationScreen.INTEGRATIONS -> {
+                        MinimalIntegrationsScreen(
+                            uiState = uiState,
+                            viewModel = viewModel
+                        )
+                    }
                     WorkstationScreen.MEMORY -> {
                         MinimalWorkspaceScreen(
                             uiState = uiState,
@@ -214,8 +226,10 @@ fun MinimalWorkstationScreen(
 
                     val drawerItems = listOf(
                         Triple(WorkstationScreen.MODELS, "Models Hub", Icons.Default.Psychology),
+                        Triple(WorkstationScreen.GIT, "Git Source Control", Icons.Default.Code),
+                        Triple(WorkstationScreen.INTEGRATIONS, "Cloud & Drive Integrations", Icons.Default.Folder),
                         Triple(WorkstationScreen.AUDIT, "Security & Audit", Icons.Default.Security),
-                        Triple(WorkstationScreen.MEMORY, "Workspace & Memory", Icons.Default.Folder),
+                        Triple(WorkstationScreen.MEMORY, "Workspace & Memory", Icons.Default.Memory),
                         Triple(WorkstationScreen.SETTINGS, "Settings & Diagnostics", Icons.Default.Settings)
                     )
 
@@ -253,6 +267,8 @@ fun MinimalWorkstationScreen(
                     "Switch to Code Editor" to { viewModel.switchScreen(WorkstationScreen.EDITOR) },
                     "Switch to Sandboxed Terminal" to { viewModel.switchScreen(WorkstationScreen.TERMINAL) },
                     "Launch Autonomous ReAct Agent" to { viewModel.switchScreen(WorkstationScreen.AGENT) },
+                    "Manage Git Repositories" to { viewModel.switchScreen(WorkstationScreen.GIT) },
+                    "Cloud & Google Drive Integrations" to { viewModel.switchScreen(WorkstationScreen.INTEGRATIONS) },
                     "Run Full Security Audit" to {
                         viewModel.runProjectAudit()
                         viewModel.switchScreen(WorkstationScreen.AUDIT)
@@ -260,10 +276,6 @@ fun MinimalWorkstationScreen(
                     "View Local GGUF Models" to { viewModel.switchScreen(WorkstationScreen.MODELS) },
                     "Run Robolectric Unit Tests" to {
                         viewModel.runTerminalCommand("gradle :app:testDebugUnitTest")
-                        viewModel.switchScreen(WorkstationScreen.TERMINAL)
-                    },
-                    "Check Git Status" to {
-                        viewModel.runTerminalCommand("git status")
                         viewModel.switchScreen(WorkstationScreen.TERMINAL)
                     },
                     "Toggle Theme" to { isDarkMode = !isDarkMode }
