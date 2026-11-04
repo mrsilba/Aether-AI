@@ -1,0 +1,19 @@
+{
+  "name": "PYTHON",
+  "scopeName": "source.python",
+  "patterns": [
+    {
+      "name": "keyword.control.python",
+      "match": "\\b(def|class|import|from|return|if|elif|else|for|while|try|except|finally|with|async|await|yield)\\b"
+    },
+    {
+      "name": "string.quoted.double.python",
+      "begin": "\"",
+      "end": "\""
+    },
+    {
+      "name": "comment.line.python",
+      "match": "(//|#).*$"
+    }
+  ]
+}

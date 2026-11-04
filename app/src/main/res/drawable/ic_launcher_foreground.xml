@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer Shield / Hexagonal Prism -->
+    <path
+        android:pathData="M54,26 L79,40 L79,68 L54,82 L29,68 L29,40 Z"
+        android:strokeWidth="2.5"
+        android:strokeColor="#00E5FF"
+        android:fillColor="#101827" />
+
+    <!-- Isometric Inner Cube / Core Engine -->
+    <path
+        android:pathData="M54,35 L71,45 L54,55 L37,45 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="37"
+                android:startY="35"
+                android:endX="71"
+                android:endY="55"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#00E5FF" />
+                <item android:offset="1.0" android:color="#38BDF8" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M37,45 L54,55 L54,73 L37,63 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="37"
+                android:startY="45"
+                android:endX="54"
+                android:endY="73"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#0284C7" />
+                <item android:offset="1.0" android:color="#0369A1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M54,55 L71,45 L71,63 L54,73 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="54"
+                android:startY="45"
+                android:endX="71"
+                android:endY="73"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#818CF8" />
+                <item android:offset="1.0" android:color="#6366F1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Glowing Center Neural Spark -->
+    <path
+        android:pathData="M54,50 L57,54 L54,58 L51,54 Z"
+        android:fillColor="#FFFFFF" />
+
+    <!-- Left Bracket < -->
+    <path
+        android:pathData="M24,47 L19,54 L24,61"
+        android:strokeWidth="2.5"
+        android:strokeColor="#A855F7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Right Bracket > -->
+    <path
+        android:pathData="M84,47 L89,54 L84,61"
+        android:strokeWidth="2.5"
+        android:strokeColor="#A855F7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

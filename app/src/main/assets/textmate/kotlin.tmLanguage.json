@@ -1,0 +1,19 @@
+{
+  "name": "KOTLIN",
+  "scopeName": "source.kotlin",
+  "patterns": [
+    {
+      "name": "keyword.control.kotlin",
+      "match": "\\b(package|import|class|interface|object|fun|val|var|if|else|when|for|while|return|suspend|override|private|public|internal|data|sealed)\\b"
+    },
+    {
+      "name": "string.quoted.double.kotlin",
+      "begin": "\"",
+      "end": "\""
+    },
+    {
+      "name": "comment.line.kotlin",
+      "match": "(//|#).*$"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "CPP",
+  "scopeName": "source.cpp",
+  "patterns": [
+    {
+      "name": "keyword.control.cpp",
+      "match": "\\b(namespace|class|struct|enum|void|int|float|double|bool|char|const|static|inline|virtual|override|return|if|else|for|while|switch|case)\\b"
+    },
+    {
+      "name": "string.quoted.double.cpp",
+      "begin": "\"",
+      "end": "\""
+    },
+    {
+      "name": "comment.line.cpp",
+      "match": "(//|#).*$"
+    }
+  ]
+}

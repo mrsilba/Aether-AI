@@ -1,0 +1,40 @@
+{
+  "languages": [
+    {
+      "name": "Kotlin",
+      "scopeName": "source.kotlin",
+      "grammar": "textmate/kotlin.tmLanguage.json",
+      "extensions": [
+        "kt",
+        "kts"
+      ]
+    },
+    {
+      "name": "Python",
+      "scopeName": "source.python",
+      "grammar": "textmate/python.tmLanguage.json",
+      "extensions": [
+        "py"
+      ]
+    },
+    {
+      "name": "C++",
+      "scopeName": "source.cpp",
+      "grammar": "textmate/cpp.tmLanguage.json",
+      "extensions": [
+        "cpp",
+        "cc",
+        "h",
+        "hpp"
+      ]
+    },
+    {
+      "name": "JSON",
+      "scopeName": "source.json",
+      "grammar": "textmate/json.tmLanguage.json",
+      "extensions": [
+        "json"
+      ]
+    }
+  ]
+}
