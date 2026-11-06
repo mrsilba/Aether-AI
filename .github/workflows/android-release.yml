@@ -60,38 +60,43 @@ jobs:
         with:
           packages: 'platform-tools'
 
-      - name: Install Android SDK Packages
+      - name: Install Android SDK Packages & Accept Licenses
         run: |
           echo "Accepting Android SDK licenses..."
           yes | sdkmanager --licenses || true
-          echo "Installing exact Android SDK packages without deprecated tools..."
+          echo "Installing required Android SDK packages..."
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-36" \
             "platforms;android-35" \
+            "platforms;android-34" \
             "build-tools;36.0.0" \
             "build-tools;35.0.0" \
-            "cmake;3.22.1" \
-            "ndk;26.1.10909125"
+            "build-tools;34.0.0" \
+            "cmake;3.22.1"
           yes | sdkmanager --licenses || true
+          if [ -z "$ANDROID_SDK_ROOT" ]; then
+            echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+          fi
 
       - name: Verify Android SDK
         run: |
-          echo "=== Android SDK Diagnostic Verification ==="
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          test -d "$ANDROID_HOME"
+          test -d "$ANDROID_SDK_ROOT"
+          test -x "$ANDROID_HOME/platform-tools/adb"
           sdkmanager --list_installed
-          adb version
-          java -version
 
       - name: Set up Gradle Environment
         uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: '8.10.2'
           cache-read-only: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/v') }}
 
       - name: Grant Execute Permissions to Gradle Wrapper
-        run: chmod +x gradlew || true
+        run: |
+          chmod +x gradlew
+          ./gradlew --version
 
       # ====================================================================
       # 2. AUTOMATED TESTING
@@ -99,8 +104,9 @@ jobs:
       - name: Run Unit & Robolectric Tests
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_tests }}
         run: |
-          echo "Executing Aether AI automated test suite..."
-          ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace || gradle :app:testDebugUnitTest --no-daemon --stacktrace
+          echo "Executing Aether AI automated test suite via Gradle Wrapper..."
+          ./gradlew --no-daemon clean
+          ./gradlew --no-daemon :app:testDebugUnitTest --stacktrace
 
       - name: Upload Test Results
         if: always()
@@ -146,14 +152,14 @@ jobs:
       - name: Build Android Package
         run: |
           BUILD_TASK="${{ inputs.build_type || 'assembleRelease' }}"
-          echo "Building Aether AI with task: $BUILD_TASK"
+          echo "Building Aether AI with task: $BUILD_TASK via Gradle Wrapper"
 
           if [ "$HAS_RELEASE_SIGNING" = "true" ]; then
             echo "Building with release signing credentials..."
-            ./gradlew "$BUILD_TASK" --no-daemon --stacktrace || gradle "$BUILD_TASK" --no-daemon --stacktrace
+            ./gradlew --no-daemon "$BUILD_TASK" --stacktrace
           else
             echo "Building release APK (unsigned/fallback) or debug APK..."
-            ./gradlew "$BUILD_TASK" --no-daemon --stacktrace || ./gradlew assembleDebug --no-daemon --stacktrace || gradle assembleDebug --no-daemon
+            ./gradlew --no-daemon "$BUILD_TASK" --stacktrace || ./gradlew --no-daemon assembleDebug --stacktrace
           fi
 
       # ====================================================================
