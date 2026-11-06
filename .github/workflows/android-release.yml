@@ -57,6 +57,32 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+
+      - name: Install Android SDK Packages
+        run: |
+          echo "Accepting Android SDK licenses..."
+          yes | sdkmanager --licenses || true
+          echo "Installing exact Android SDK packages without deprecated tools..."
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-36" \
+            "platforms;android-35" \
+            "build-tools;36.0.0" \
+            "build-tools;35.0.0" \
+            "cmake;3.22.1" \
+            "ndk;26.1.10909125"
+          yes | sdkmanager --licenses || true
+
+      - name: Verify Android SDK
+        run: |
+          echo "=== Android SDK Diagnostic Verification ==="
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          sdkmanager --list_installed
+          adb version
+          java -version
 
       - name: Set up Gradle Environment
         uses: gradle/actions/setup-gradle@v3
@@ -131,9 +157,9 @@ jobs:
           fi
 
       # ====================================================================
-      # 5. LOCATE ARTIFACTS & GENERATE CHECKSUMS
+      # 5. VERIFY APK EXISTENCE, METADATA & CALCULATE CHECKSUMS
       # ====================================================================
-      - name: Collect Artifacts and Generate SHA-256 Checksums
+      - name: Verify APK, Metadata & Compute Checksums
         id: package_artifacts
         run: |
           mkdir -p dist_artifacts
@@ -145,6 +171,20 @@ jobs:
           cd dist_artifacts
           echo "Collected artifacts:"
           ls -lh
+
+          PRIMARY_APK=$(find . -name "*.apk" | head -n 1)
+          if [ -z "$PRIMARY_APK" ]; then
+            echo "ERROR: No APK was generated!"
+            exit 1
+          fi
+
+          echo "Primary APK detected: $PRIMARY_APK"
+
+          # Verify APK with aapt2 if available
+          if command -v aapt2 &> /dev/null; then
+            echo "Verifying APK package metadata via aapt2..."
+            aapt2 dump badging "$PRIMARY_APK" | grep -E "package: name=|versionCode=|versionName=" || true
+          fi
 
           # Calculate SHA-256 and MD5 for every artifact
           for file in *; do
@@ -159,12 +199,6 @@ jobs:
           # Create a consolidated CHECKSUMS.txt manifest
           sha256sum *.{apk,aab} 2>/dev/null > CHECKSUMS_SHA256.txt || true
           cd ..
-
-          PRIMARY_APK=$(find dist_artifacts/ -name "*.apk" | head -n 1)
-          if [ -n "$PRIMARY_APK" ]; then
-            echo "primary_apk=$PRIMARY_APK" >> $GITHUB_OUTPUT
-            echo "primary_apk_name=$(basename "$PRIMARY_APK")" >> $GITHUB_OUTPUT
-          fi
 
       # ====================================================================
       # 6. ARTIFACT UPLOADS
