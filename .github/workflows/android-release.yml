@@ -119,31 +119,48 @@ jobs:
       # ====================================================================
       # 3. SIGNING CONFIGURATION USING REPOSITORY SECRETS
       # ====================================================================
+      - name: Prepare Debug Keystore Fallback
+        run: |
+          echo "Verifying debug keystore availability..."
+          if [ ! -f "debug.keystore" ]; then
+            if [ -f "debug.keystore.base64" ]; then
+              echo "Restoring debug.keystore from repository base64 template..."
+              base64 --decode debug.keystore.base64 > debug.keystore
+            else
+              echo "Generating standard debug keystore via keytool..."
+              keytool -genkey -v -keystore debug.keystore \
+                -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+                -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US"
+            fi
+          fi
+          test -f "debug.keystore" && echo "Debug keystore ready."
+
       - name: Configure Release Signing Keystore from Secrets
         id: signing_setup
         run: |
           echo "Configuring release signing parameters..."
-          mkdir -p "${{ github.workspace }}/keystore"
+          TEMP_KEYSTORE_DIR="${{ runner.temp }}/keystore"
+          mkdir -p "$TEMP_KEYSTORE_DIR"
 
-          # Support both KEYSTORE_BASE64 and RELEASE_KEYSTORE_BASE64 secret naming
-          KEYSTORE_SECRET="${{ secrets.KEYSTORE_BASE64 || secrets.RELEASE_KEYSTORE_BASE64 }}"
-          STORE_PWD="${{ secrets.STORE_PASSWORD || secrets.KEYSTORE_PASSWORD }}"
-          KEY_PWD="${{ secrets.KEY_PASSWORD }}"
-          KEY_ALIAS_NAME="${{ secrets.KEY_ALIAS || 'upload' }}"
+          # Support ANDROID_KEYSTORE_BASE64, KEYSTORE_BASE64, and RELEASE_KEYSTORE_BASE64
+          KEYSTORE_SECRET="${{ secrets.ANDROID_KEYSTORE_BASE64 || secrets.KEYSTORE_BASE64 || secrets.RELEASE_KEYSTORE_BASE64 }}"
+          STORE_PWD="${{ secrets.ANDROID_KEYSTORE_PASSWORD || secrets.STORE_PASSWORD || secrets.KEYSTORE_PASSWORD }}"
+          KEY_PWD="${{ secrets.ANDROID_KEY_PASSWORD || secrets.KEY_PASSWORD }}"
+          KEY_ALIAS_NAME="${{ secrets.ANDROID_KEY_ALIAS || secrets.KEY_ALIAS || 'upload' }}"
 
           if [ -n "$KEYSTORE_SECRET" ] && [ -n "$STORE_PWD" ] && [ -n "$KEY_PWD" ]; then
             echo "Decoding release keystore from repository secrets..."
-            echo "$KEYSTORE_SECRET" | base64 --decode > "${{ github.workspace }}/keystore/release.jks"
-            echo "KEYSTORE_PATH=${{ github.workspace }}/keystore/release.jks" >> $GITHUB_ENV
+            echo "$KEYSTORE_SECRET" | base64 --decode > "$TEMP_KEYSTORE_DIR/release.jks"
+            echo "KEYSTORE_PATH=$TEMP_KEYSTORE_DIR/release.jks" >> $GITHUB_ENV
             echo "STORE_PASSWORD=$STORE_PWD" >> $GITHUB_ENV
             echo "KEY_PASSWORD=$KEY_PWD" >> $GITHUB_ENV
             echo "KEY_ALIAS=$KEY_ALIAS_NAME" >> $GITHUB_ENV
             echo "HAS_RELEASE_SIGNING=true" >> $GITHUB_ENV
             echo "Release keystore configured successfully."
           else
-            echo "Release keystore secrets not fully configured (KEYSTORE_BASE64, STORE_PASSWORD, KEY_PASSWORD)."
+            echo "Release keystore secrets not configured (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD)."
             echo "HAS_RELEASE_SIGNING=false" >> $GITHUB_ENV
-            echo "Will generate unsigned release APK or debug-signed APK."
+            echo "Will generate unsigned release APK or debug APK."
           fi
 
       # ====================================================================
@@ -158,9 +175,16 @@ jobs:
             echo "Building with release signing credentials..."
             ./gradlew --no-daemon "$BUILD_TASK" --stacktrace
           else
-            echo "Building release APK (unsigned/fallback) or debug APK..."
+            echo "Building release APK (unsigned) or debug APK..."
             ./gradlew --no-daemon "$BUILD_TASK" --stacktrace || ./gradlew --no-daemon assembleDebug --stacktrace
           fi
+
+      - name: Secure Cleanup of Sensitive Keystore Files
+        if: always()
+        run: |
+          echo "Cleaning up any temporary release keystore files..."
+          rm -rf "${{ runner.temp }}/keystore"
+
 
       # ====================================================================
       # 5. VERIFY APK EXISTENCE, METADATA & CALCULATE CHECKSUMS

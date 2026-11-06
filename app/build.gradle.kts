@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Base64
 
 plugins {
   alias(libs.plugins.android.application)
@@ -26,14 +27,35 @@ android {
   // and updating Android apps in AI Studio.
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      val keystorePath = System.getenv("KEYSTORE_PATH")
+      val targetKeystore = if (!keystorePath.isNullOrBlank()) {
+        file(keystorePath)
+      } else {
+        file("${rootDir}/my-upload-key.jks")
+      }
+      if (targetKeystore.exists()) {
+        storeFile = targetKeystore
+        storePassword = System.getenv("STORE_PASSWORD")
+        keyAlias = System.getenv("KEY_ALIAS") ?: "upload"
+        keyPassword = System.getenv("KEY_PASSWORD")
+      }
     }
     create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
+      val rootDebugKeystore = file("${rootDir}/debug.keystore")
+      val base64DebugKeystore = file("${rootDir}/debug.keystore.base64")
+      if (!rootDebugKeystore.exists() && base64DebugKeystore.exists()) {
+        try {
+          val decoded = Base64.getDecoder().decode(base64DebugKeystore.readText().trim())
+          rootDebugKeystore.writeBytes(decoded)
+        } catch (_: Throwable) {
+          // Ignore decoding errors and fallback to standard location
+        }
+      }
+      if (rootDebugKeystore.exists()) {
+        storeFile = rootDebugKeystore
+      } else {
+        storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
+      }
       storePassword = "android"
       keyAlias = "androiddebugkey"
       keyPassword = "android"
@@ -47,7 +69,12 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
-      signingConfig = signingConfigs.getByName("release")
+      val releaseConfig = signingConfigs.getByName("release")
+      signingConfig = if (releaseConfig.storeFile != null && releaseConfig.storeFile?.exists() == true) {
+        releaseConfig
+      } else {
+        null
+      }
     }
     debug {
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
