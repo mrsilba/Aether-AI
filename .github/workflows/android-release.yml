@@ -78,6 +78,8 @@ jobs:
           if [ -z "$ANDROID_SDK_ROOT" ]; then
             echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
           fi
+          echo "$ANDROID_HOME/build-tools/36.0.0" >> $GITHUB_PATH
+          echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
 
       - name: Verify Android SDK
         run: |
@@ -164,19 +166,20 @@ jobs:
           fi
 
       # ====================================================================
-      # 4. BUILD & PACKAGE APK
+      # 4. BUILD & PACKAGE INSTALLABLE APK
       # ====================================================================
       - name: Build Android Package
         run: |
           BUILD_TASK="${{ inputs.build_type || 'assembleRelease' }}"
-          echo "Building Aether AI with task: $BUILD_TASK via Gradle Wrapper"
+          echo "Requested build task: $BUILD_TASK"
 
           if [ "$HAS_RELEASE_SIGNING" = "true" ]; then
-            echo "Building with release signing credentials..."
+            echo "Release signing credentials detected. Building certified release APK..."
             ./gradlew --no-daemon "$BUILD_TASK" --stacktrace
           else
-            echo "Building release APK (unsigned) or debug APK..."
-            ./gradlew --no-daemon "$BUILD_TASK" --stacktrace || ./gradlew --no-daemon assembleDebug --stacktrace
+            echo "No production release signing secrets configured."
+            echo "Building installable debug APK so the resulting package can be installed directly on target devices without Android Package Manager rejection..."
+            ./gradlew --no-daemon assembleDebug --stacktrace
           fi
 
       - name: Secure Cleanup of Sensitive Keystore Files
@@ -185,40 +188,87 @@ jobs:
           echo "Cleaning up any temporary release keystore files..."
           rm -rf "${{ runner.temp }}/keystore"
 
-
       # ====================================================================
-      # 5. VERIFY APK EXISTENCE, METADATA & CALCULATE CHECKSUMS
+      # 5. FORENSIC APK INTEGRITY, SIGNATURE & METADATA VALIDATION
       # ====================================================================
-      - name: Verify APK, Metadata & Compute Checksums
-        id: package_artifacts
+      - name: Forensic APK Integrity, Signature & Device Compatibility Validation
+        id: validate_and_package
         run: |
           mkdir -p dist_artifacts
 
-          # Find all generated APKs and AABs
-          echo "Searching for generated build outputs..."
+          # Collect generated APKs and AABs
           find app/build/outputs/ -type f \( -name "*.apk" -o -name "*.aab" \) -exec cp {} dist_artifacts/ \;
 
           cd dist_artifacts
-          echo "Collected artifacts:"
+          echo "Collected artifact files:"
           ls -lh
 
-          PRIMARY_APK=$(find . -name "*.apk" | head -n 1)
+          # Prefer signed release APK, then signed debug APK, rejecting any unsigned APK
+          PRIMARY_APK=""
+          for candidate in app-release.apk app-debug.apk; do
+            if [ -f "$candidate" ]; then
+              PRIMARY_APK="$candidate"
+              break
+            fi
+          done
+
           if [ -z "$PRIMARY_APK" ]; then
-            echo "ERROR: No APK was generated!"
+            echo "FATAL: No suitable installable APK (app-release.apk or app-debug.apk) was produced!"
             exit 1
           fi
 
-          echo "Primary APK detected: $PRIMARY_APK"
+          echo "Target Primary APK for Validation: $PRIMARY_APK"
 
-          # Verify APK with aapt2 if available
-          if command -v aapt2 &> /dev/null; then
-            echo "Verifying APK package metadata via aapt2..."
-            aapt2 dump badging "$PRIMARY_APK" | grep -E "package: name=|versionCode=|versionName=" || true
+          # 1. Non-empty check
+          if [ ! -s "$PRIMARY_APK" ]; then
+            echo "FATAL: APK file $PRIMARY_APK is empty!"
+            exit 1
           fi
 
-          # Calculate SHA-256 and MD5 for every artifact
+          # 2. ZIP Archive Integrity Check
+          echo "Validating ZIP container integrity..."
+          unzip -t "$PRIMARY_APK" > /dev/null || {
+            echo "FATAL: APK ZIP container corrupted!"
+            exit 1
+          }
+          echo "ZIP container integrity: PASSED"
+
+          # 3. AAPT2 Manifest & Device Compatibility Badging
+          echo "Validating package metadata, SDK levels, and ABIs via aapt2..."
+          aapt2 dump badging "$PRIMARY_APK" > aapt2_badging.txt
+          cat aapt2_badging.txt | grep -E "package: name=|versionCode=|versionName=|minSdkVersion|targetSdkVersion|native-code"
+
+          # Verify mandatory package name
+          grep "name='com.aistudio.aetherai.kqwzrt'" aapt2_badging.txt || {
+            echo "FATAL: Package name mismatch!"
+            exit 1
+          }
+
+          # Verify ARM64-v8a compatibility
+          grep "arm64-v8a" aapt2_badging.txt || {
+            echo "FATAL: arm64-v8a architecture not supported!"
+            exit 1
+          }
+          echo "Package metadata and ARM64-v8a compatibility: PASSED"
+
+          # 4. APK Signature Validation with apksigner
+          echo "Verifying APK signing certificate and schemes via apksigner..."
+          apksigner verify --verbose --print-certs "$PRIMARY_APK" > apksigner_report.txt
+          cat apksigner_report.txt
+
+          grep "Verified using v2 scheme (APK Signature Scheme v2): true" apksigner_report.txt || {
+            echo "FATAL: APK is not signed with valid APK Signature Scheme v2!"
+            exit 1
+          }
+          echo "APK signature verification: PASSED (Signature valid, installable on Android 14/15)"
+
+          # 5. Remove any unsigned APKs from dist_artifacts to prevent user confusion
+          rm -f app-release-unsigned.apk || true
+
+          # 6. Calculate SHA-256 and MD5 for every verified artifact
+          echo "Calculating cryptographic checksums..."
           for file in *; do
-            if [ -f "$file" ]; then
+            if [ -f "$file" ] && [[ "$file" != *.sha256 && "$file" != *.md5 && "$file" != *.txt ]]; then
               sha256sum "$file" > "${file}.sha256"
               md5sum "$file" > "${file}.md5"
               echo "Checksum for $file:"
@@ -226,23 +276,26 @@ jobs:
             fi
           done
 
-          # Create a consolidated CHECKSUMS.txt manifest
+          # Consolidated SHA-256 manifest
           sha256sum *.{apk,aab} 2>/dev/null > CHECKSUMS_SHA256.txt || true
+          cat CHECKSUMS_SHA256.txt
           cd ..
 
       # ====================================================================
       # 6. ARTIFACT UPLOADS
       # ====================================================================
-      - name: Upload Build Artifacts & Checksums
+      - name: Upload Verified Installable Build Artifacts & Checksums
         uses: actions/upload-artifact@v4
         with:
-          name: aether-ai-build-artifacts
+          name: aether-ai-verified-installable-apk
           path: |
             dist_artifacts/*.apk
             dist_artifacts/*.aab
             dist_artifacts/*.sha256
             dist_artifacts/*.md5
             dist_artifacts/CHECKSUMS_SHA256.txt
+            dist_artifacts/apksigner_report.txt
+            dist_artifacts/aapt2_badging.txt
           retention-days: 30
           if-no-files-found: error
 
@@ -261,6 +314,8 @@ jobs:
             dist_artifacts/*.sha256
             dist_artifacts/*.md5
             dist_artifacts/CHECKSUMS_SHA256.txt
+            dist_artifacts/apksigner_report.txt
+            dist_artifacts/aapt2_badging.txt
           draft: false
           prerelease: false
         env:
